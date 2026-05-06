@@ -290,6 +290,15 @@ function buildCandidate(anchor, records, thresholds) {
   const coreInterpretation = buildCoreInterpretation(concepts, cognitiveDimensions);
   const actionTendency = buildActionTendency(concepts, cognitiveDimensions);
   const emotionalSignature = buildEmotionalSignature(cognitiveDimensions, concepts);
+  const schemaGraph = buildVirtualSchemaGraph({
+    id: `induced_${slug([anchor, ...concepts.slice(0, 3)].join("_"))}`,
+    label,
+    concepts,
+    cognitiveDimensions,
+    evidenceRecords,
+    state,
+    confidence,
+  });
 
   return {
     id: `induced_${slug([anchor, ...concepts.slice(0, 3)].join("_"))}`,
@@ -315,6 +324,9 @@ function buildCandidate(anchor, records, thresholds) {
     active_day_count: activeDayCount,
     cohesion,
     confidence,
+    nodes: schemaGraph.nodes,
+    edges: schemaGraph.edges,
+    schema_graph: schemaGraph,
     formation_basis: buildFormationBasis({
       support,
       weightedSupport,
@@ -359,6 +371,8 @@ function buildCandidate(anchor, records, thresholds) {
         cognitive_dimensions: cognitiveDimensions,
       },
       evidence_packet_ids: evidenceRecords.map((record) => record.packet_id || `packet:${record.id}`),
+      nodes: schemaGraph.nodes,
+      edges: schemaGraph.edges,
     },
     evidence_records: evidenceRecords,
     claim_type: "virtual_cognitive_schema_signal",
@@ -543,6 +557,59 @@ function buildSchemaNetwork(schemas) {
         type: "supported_by_packet",
         weight: Number(record.schema_record_score ?? record.meaningful_score ?? 1),
       });
+    });
+  });
+
+  return { nodes, edges };
+}
+
+function buildVirtualSchemaGraph({ id, label, concepts, cognitiveDimensions, evidenceRecords, state, confidence }) {
+  const schemaId = `schema:${id}`;
+  const nodes = [
+    {
+      id: schemaId,
+      type: "virtual_cognitive_schema",
+      category: "schema",
+      label,
+      lifecycle_state: state,
+      confidence,
+    },
+  ];
+  const edges = [];
+  const seen = new Set([schemaId]);
+  const addNode = (node) => {
+    if (!node?.id || seen.has(node.id)) return;
+    seen.add(node.id);
+    nodes.push(node);
+  };
+
+  concepts.slice(0, 12).forEach((concept) => {
+    const conceptId = `concept:${slug(concept)}`;
+    addNode({ id: conceptId, type: "concept", category: "schema_marker", label: concept });
+    edges.push({ from: schemaId, to: conceptId, type: "contains_marker", category: "schema_structure", weight: 1 });
+  });
+
+  cognitiveDimensions.forEach((dimension) => {
+    const dimensionId = `dimension:${slug(dimension)}`;
+    addNode({ id: dimensionId, type: "cognitive_dimension", category: "schema_category", label: dimension });
+    edges.push({ from: schemaId, to: dimensionId, type: "classified_as", category: "schema_classification", weight: 1 });
+  });
+
+  evidenceRecords.slice(0, 8).forEach((record) => {
+    const packetId = record.packet_id || `packet:${record.id}`;
+    addNode({
+      id: packetId,
+      type: "meaning_packet",
+      category: "evidence",
+      label: record.source_label,
+      score: Number(record.meaningful_score ?? 1),
+    });
+    edges.push({
+      from: packetId,
+      to: schemaId,
+      type: "supports_schema",
+      category: "evidence_support",
+      weight: Number(record.schema_record_score ?? record.meaningful_score ?? 1),
     });
   });
 

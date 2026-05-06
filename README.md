@@ -18,6 +18,8 @@ Schema does not capture browser data, store long-term memory, or diagnose the us
 - Ignores records that did not pass the meaningfulness gate.
 - Groups repeated concepts, markers, sources, and time patterns.
 - Forms virtual cognitive-schema packets when support and cohesion are strong enough.
+- Classifies schema nodes and edges into cognitive dimensions such as action,
+  evaluation, identity, affect, and social context.
 - Keeps evidence records attached to every schema.
 - Emits a schema network for Memory and query-time engines.
 
@@ -43,6 +45,8 @@ Schema does not capture browser data, store long-term memory, or diagnose the us
       "support": 4,
       "confidence": 0.72,
       "schema_kind": "virtual_cognitive_schema",
+      "nodes": [],
+      "edges": [],
       "evidence_records": []
     }
   ],
@@ -95,6 +99,8 @@ npm run schema -- --input path\to\inference-output.json --format json
 - Activities are evidence, not schemas.
 - Schemas require repeated meaningful support.
 - A schema packet is a virtual mirror, not a medical claim.
+- Schemas contain classified nodes and edges. They are knowledge-graph packets,
+  not plain topic labels.
 - Memory decides whether a schema survives.
 
 ## License
