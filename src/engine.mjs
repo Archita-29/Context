@@ -209,6 +209,7 @@ export function groupByCategory(records = []) {
 export function inferSchemaType(record = {}) {
   const themes = Array.isArray(record.canonical_themes) ? record.canonical_themes : []
   const text = `${record.category || ""} ${themes.join(" ")} ${record.evidence?.title || ""}`.toLowerCase()
+  if (/reading|article|summary|scroll|finish|completion/.test(text)) return "reading_preferences"
   if (/shop|commerce|product/.test(text)) return "shopping"
   if (/learn|study|tutorial|course/.test(text)) return "learning"
   if (/research|paper|source|documentation|api/.test(text)) return "research"
@@ -226,6 +227,7 @@ export function createSchemaPacket(group = [], options = {}) {
   const category = records[0]?.category || records[0]?.evidence?.category || inferRecordCategory(records[0])
   const schemaType = options.schemaType || inferSchemaType(records[0] || {})
   const confidence = round(records.reduce((sum, record) => sum + Number(record.meaningful_score || 0.5), 0) / Math.max(1, records.length))
+  const readingAttributes = schemaType === "reading_preferences" ? buildReadingAttributes(records) : {}
   return {
     schema_version: "memact.schema_packet.v0",
     packet_id: `schema_${slug(`${category}_${schemaType}_${records.length}`)}`,
@@ -235,7 +237,8 @@ export function createSchemaPacket(group = [], options = {}) {
     confidence,
     attributes: {
       record_count: records.length,
-      themes: unique(records.flatMap((record) => record.canonical_themes || []))
+      themes: unique(records.flatMap((record) => record.canonical_themes || [])),
+      ...readingAttributes
     },
     sources: records.flatMap((record) => record.sources || []),
     created_at: new Date().toISOString()
@@ -244,11 +247,40 @@ export function createSchemaPacket(group = [], options = {}) {
 
 function inferSubSchema(records = []) {
   const text = records.map((record) => `${record.source_label || ""} ${record.evidence?.title || ""} ${(record.canonical_themes || []).join(" ")}`).join(" ").toLowerCase()
+  if (/summary_detail_preference|summary expanded/.test(text)) return "summary_style_preference"
+  if (/quick_summary_preference|summary collapsed/.test(text)) return "summary_style_preference"
+  if (/long_read|short_read/.test(text)) return "article_length_preference"
+  if (/skipped_topic|topic skipped/.test(text)) return "skipped_topics"
+  if (/high_engagement|low_engagement|scroll/.test(text)) return "engagement_pattern"
   if (/discount|coupon|sale|price|deal/.test(text)) return "discount"
   if (/source|citation|reference/.test(text)) return "sources"
   if (/task|todo|deadline/.test(text)) return "tasks"
   if (/focus|interrupt|overload/.test(text)) return "attention_load"
   return "general"
+}
+
+function buildReadingAttributes(records = []) {
+  const topics = unique(records.map((record) => record.evidence?.article_topic).filter(Boolean))
+  const skippedTopics = unique(records
+    .filter((record) => (record.canonical_themes || []).includes("skipped_topic"))
+    .map((record) => record.evidence?.article_topic)
+    .filter(Boolean))
+  const scrollDepths = records.map((record) => Number(record.evidence?.scroll_depth || 0)).filter((value) => value > 0)
+  const finishCount = records.filter((record) => (record.canonical_themes || []).includes("completion")).length
+  const longReads = records.filter((record) => (record.canonical_themes || []).includes("long_read")).length
+  const shortReads = records.filter((record) => (record.canonical_themes || []).includes("short_read")).length
+  const detailSignals = records.filter((record) => (record.canonical_themes || []).includes("summary_detail_preference")).length
+  const quickSignals = records.filter((record) => (record.canonical_themes || []).includes("quick_summary_preference")).length
+  return {
+    preferred_topics: topics.filter((topic) => !skippedTopics.includes(topic)),
+    skipped_topics: skippedTopics,
+    average_scroll_depth: scrollDepths.length ? round(scrollDepths.reduce((sum, value) => sum + value, 0) / scrollDepths.length) : 0,
+    finish_rate: records.length ? round(finishCount / records.length) : 0,
+    preferred_article_length: longReads > shortReads ? "long" : shortReads > longReads ? "short" : "unknown",
+    preferred_summary_style: detailSignals > quickSignals ? "deep_dive" : quickSignals > detailSignals ? "quick_brief" : "unknown",
+    repeat_topics: topics.filter((topic) => records.filter((record) => record.evidence?.article_topic === topic).length > 1),
+    engagement_pattern: scrollDepths.some((value) => value >= 75) ? "high_scroll_depth" : scrollDepths.some((value) => value < 35) ? "low_scroll_depth" : "unknown"
+  }
 }
 
 export function formatSchemaReport(result) {
@@ -468,6 +500,7 @@ function profileRecord(record) {
 
 function inferRecordCategory(record = {}) {
   const text = `${record.category || ""} ${record.source_label || ""} ${record.evidence?.title || ""} ${(record.canonical_themes || []).join(" ")}`.toLowerCase()
+  if (/reading|article|summary|scroll|finish/.test(text)) return "reading"
   if (/shop|commerce|product|discount|price/.test(text)) return "shopping"
   if (/learn|study|tutorial|course/.test(text)) return "learning"
   if (/research|paper|source|documentation|api/.test(text)) return "research"
