@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.0.0",
   "description": "Schema packet layer for organizing approved user-context signals into reusable personalization context.",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./src/engine.mjs",
   "exports": {
