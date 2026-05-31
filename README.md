@@ -4,6 +4,40 @@ Schema defines app category schemas for Memact.
 
 Apps can send messy context. App categories give that context shape. Wiki gives users control over the final user-readable memory.
 
+## For SSoC26 Contributors
+
+Start here if you are new to Memact.
+
+Schema is the main beginner-friendly contribution path. Pick an app category you understand and define how context should work there.
+
+Before starting, read:
+
+- [`MEMACT.md`](./MEMACT.md) for the contributor handoff.
+- [`CONTRIBUTING.md`](https://github.com/Memact/.github/blob/main/CONTRIBUTING.md) for the org-wide contributor guide.
+
+Good first issues are labeled:
+
+- `SSoC26`
+- `good first issue`
+- `difficulty: beginner`
+- `schema`
+
+Please comment on an issue before starting so work does not get duplicated.
+
+A good category schema contribution should include:
+
+- useful context fields
+- raw app context examples
+- normalized context examples
+- user-facing Wiki entry templates
+- fields that require extra care
+- category-level permission suggestions
+- basic tests
+
+Important rule: apps propose context, but users control what becomes accepted memory.
+
+Prefer user-readable summaries over raw personal data. Do not infer sensitive traits. Do not write fake certainty.
+
 ## Owns
 
 - App category schemas.
