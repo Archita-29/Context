@@ -33,6 +33,7 @@
   },
   "scripts": {
     "check": "node ./scripts/check.mjs",
+    "test": "node test/schema-packets.test.mjs && node test/news-articles.test.mjs",
     "schema": "node ./src/cli.mjs",
     "sample": "node ./src/cli.mjs --input examples/sample-inference-output.json --format report",
     "sample:json": "node ./src/cli.mjs --input examples/sample-inference-output.json --format json"
