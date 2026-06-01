@@ -101,6 +101,8 @@ export const NEWS_ARTICLES_PERMISSIONS = [
 ];
 
 // 3. Sensitive Topics Definition
+// NOTE: This sensitive keyword list is a draft/heuristic protection rule, not a final sensitivity system.
+// Some keywords like "policy" and "government" may over-trigger and are included here as first-pass heuristics.
 export const SENSITIVE_TOPIC_RULES = {
   sensitive_keywords: [
     "politics", "election", "democrat", "republican", "government", "policy",
@@ -272,7 +274,10 @@ export function normalizeReadingActivity(rawActivity = [], options = {}) {
   const preferred_formats = Object.entries(formatCounts)
     .filter(([, count]) => count > 0)
     .sort((a, b) => b[1] - a[1])
-    .map(([fmt]) => fmt + "s"); // e.g., explainers, summaries
+    .map(([fmt]) => {
+      if (fmt === "summary") return "summaries";
+      return fmt + "s";
+    });
 
   // Preferred article lengths
   const preferred_article_lengths = Object.entries(lengthCounts)
@@ -318,7 +323,7 @@ export function generateWikiEntries(normalizedContext) {
       id: `wiki_durable_${interest.topic.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
       type: "interest",
       sub_type: "durable",
-      proposed_text: `Frequently reads articles about ${interest.topic}.`,
+      proposed_text: `Recently reads several articles about ${interest.topic}.`,
       raw_source_summary: `Detected across ${interest.article_count} articles over ${interest.distinct_days} different days.`,
       confidence: interest.confidence,
       requires_user_confirmation: false,
@@ -394,12 +399,15 @@ export function generateWikiEntries(normalizedContext) {
   }
 
   if (reading_cadence && reading_cadence !== "intermittent") {
-    const routineName = reading_cadence.replace("_", " ");
+    let cadenceText = `Often reads articles in the ${reading_cadence.replace("_reader", "")}.`;
+    if (reading_cadence === "night_reader") {
+      cadenceText = "Often reads articles at night.";
+    }
     proposals.push({
       id: "wiki_pref_cadence",
       type: "preference",
       sub_type: "reading_cadence",
-      proposed_text: `Maintains a ${routineName} reading routine.`,
+      proposed_text: cadenceText,
       raw_source_summary: "Generated from peak daily reading hour activity.",
       confidence: 0.7,
       requires_user_confirmation: false,

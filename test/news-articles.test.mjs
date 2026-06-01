@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { normalizeReadingActivity } from "../src/categories/news-articles.mjs";
+import { normalizeReadingActivity, generateWikiEntries } from "../src/categories/news-articles.mjs";
 
 test("Durable Interest Graduation: topic with >= 3 reads across >= 2 days graduates", () => {
   const rawEvents = [
@@ -165,7 +165,7 @@ test("Preference Mapping: correct extraction of publisher, length, format, and c
   
   assert.deepEqual(result.reading_preferences.preferred_publishers, ["FoodNetwork"]);
   assert.deepEqual(result.reading_preferences.preferred_article_lengths, ["short"]);
-  assert.deepEqual(result.reading_preferences.preferred_formats, ["summarys"]);
+  assert.deepEqual(result.reading_preferences.preferred_formats, ["summaries"]);
   assert.equal(result.reading_preferences.reading_cadence, "morning_reader");
 });
 
@@ -195,4 +195,41 @@ test("Skipped and Saved Articles: correctly traces skip and save actions", () =>
   assert.equal(result.saved_articles[0].url, "https://example.com/pasta");
   
   assert.ok(result.skipped_topics.includes("boring politics"));
+});
+
+test("Wiki Wording Softening: generates non-identity, softened Wiki texts for durable and cadence preferences", () => {
+  const rawEvents = [
+    {
+      id: "1",
+      topics: ["Gaming"],
+      action: "read",
+      publisher: "GameSpot",
+      occurred_at: "2026-05-01T08:00:00Z"
+    },
+    {
+      id: "2",
+      topics: ["Gaming"],
+      action: "read",
+      publisher: "GameSpot",
+      occurred_at: "2026-05-02T08:30:00Z"
+    },
+    {
+      id: "3",
+      topics: ["Gaming"],
+      action: "read",
+      publisher: "GameSpot",
+      occurred_at: "2026-05-03T08:45:00Z"
+    }
+  ];
+
+  const context = normalizeReadingActivity(rawEvents);
+  const wikiEntries = generateWikiEntries(context);
+
+  const gamingDurable = wikiEntries.find(e => e.id === "wiki_durable_gaming");
+  assert.ok(gamingDurable);
+  assert.equal(gamingDurable.proposed_text, "Recently reads several articles about Gaming.");
+
+  const cadencePref = wikiEntries.find(e => e.id === "wiki_pref_cadence");
+  assert.ok(cadencePref);
+  assert.equal(cadencePref.proposed_text, "Often reads articles in the morning.");
 });
