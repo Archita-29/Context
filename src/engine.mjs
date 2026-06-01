@@ -228,6 +228,7 @@ export function createSchemaPacket(group = [], options = {}) {
   const schemaType = options.schemaType || inferSchemaType(records[0] || {})
   const confidence = round(records.reduce((sum, record) => sum + Number(record.meaningful_score || 0.5), 0) / Math.max(1, records.length))
   const readingAttributes = schemaType === "reading_preferences" ? buildReadingAttributes(records) : {}
+  const productivityAttributes = schemaType === "productivity" ? buildProductivityAttributes(records) : {}
   return {
     schema_version: "memact.schema_packet.v0",
     packet_id: `schema_${slug(`${category}_${schemaType}_${records.length}`)}`,
@@ -238,7 +239,8 @@ export function createSchemaPacket(group = [], options = {}) {
     attributes: {
       record_count: records.length,
       themes: unique(records.flatMap((record) => record.canonical_themes || [])),
-      ...readingAttributes
+      ...readingAttributes,
+      ...productivityAttributes
     },
     sources: records.flatMap((record) => record.sources || []),
     created_at: new Date().toISOString()
@@ -256,6 +258,8 @@ function inferSubSchema(records = []) {
   if (/source|citation|reference/.test(text)) return "sources"
   if (/task|todo|deadline/.test(text)) return "tasks"
   if (/focus|interrupt|overload/.test(text)) return "attention_load"
+  if (/kanban|time-blocking|organization/.test(text)) return "organization_style"
+  if (/calendar|meeting/.test(text)) return "calendar_habits"
   return "general"
 }
 
@@ -280,6 +284,19 @@ function buildReadingAttributes(records = []) {
     preferred_summary_style: detailSignals > quickSignals ? "deep_dive" : quickSignals > detailSignals ? "quick_brief" : "unknown",
     repeat_topics: topics.filter((topic) => records.filter((record) => record.evidence?.article_topic === topic).length > 1),
     engagement_pattern: scrollDepths.some((value) => value >= 75) ? "high_scroll_depth" : scrollDepths.some((value) => value < 35) ? "low_scroll_depth" : "unknown"
+  }
+}
+
+function buildProductivityAttributes(records = []) {
+  const styles = unique(records.map((record) => record.evidence?.organization_style).filter(Boolean))
+  const projectAreas = unique(records.map((record) => record.evidence?.project_area).filter(Boolean))
+  const focusPreferences = unique(records.map((record) => record.evidence?.focus_preference).filter(Boolean))
+  const calendarHabits = unique(records.map((record) => record.evidence?.calendar_habit).filter(Boolean))
+  return {
+    preferred_organization_styles: styles,
+    recurring_project_areas: projectAreas,
+    focus_time_preferences: focusPreferences,
+    calendar_habits: calendarHabits
   }
 }
 

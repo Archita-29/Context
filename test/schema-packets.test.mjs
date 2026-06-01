@@ -68,3 +68,38 @@ test("skipped topics and low scroll depth become reading attributes", () => {
   assert.equal(packet.attributes.skipped_topics[0], "celebrity")
   assert.equal(packet.attributes.engagement_pattern, "low_scroll_depth")
 })
+
+test("productivity events create productivity preference packet", () => {
+  const packets = formSchemaPackets([
+    {
+      record_id: "p1",
+      category: "productivity",
+      meaningful_score: 0.8,
+      canonical_themes: ["productivity", "planning", "time-blocking"],
+      evidence: { project_area: "frontend_development", organization_style: "time-blocking", focus_preference: "pomodoro" },
+      sources: []
+    }
+  ])
+  assert.equal(packets[0].schema_type, "productivity")
+  assert.equal(packets[0].sub_schema, "organization_style")
+  assert.equal(packets[0].attributes.preferred_organization_styles[0], "time-blocking")
+  assert.equal(packets[0].attributes.recurring_project_areas[0], "frontend_development")
+  assert.equal(packets[0].attributes.focus_time_preferences[0], "pomodoro")
+})
+
+test("productivity schema filters overbroad private data by default", () => {
+  const packets = formSchemaPackets([
+    {
+      record_id: "p2",
+      category: "productivity",
+      meaningful_score: 0.5,
+      canonical_themes: ["productivity", "tasks"],
+      evidence: { raw_task_name: "Buy anniversary gift for Sarah", private_note: "budget $100", organization_style: "list" },
+      sources: []
+    }
+  ])
+  assert.equal(packets[0].schema_type, "productivity")
+  assert.equal(packets[0].attributes.preferred_organization_styles[0], "list")
+  assert.equal(packets[0].attributes.raw_task_name, undefined)
+  assert.equal(packets[0].attributes.private_note, undefined)
+})
