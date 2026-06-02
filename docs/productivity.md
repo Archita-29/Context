@@ -2,6 +2,10 @@
 
 The `productivity` category handles signals from apps that understand work and task preferences, such as task managers, calendars, and time-tracking tools.
 
+## Core Philosophy: Activity is not Identity
+
+Productivity activity can suggest context, but it should not silently become identity or accepted memory without the Wiki/user-control step. A flurry of tasks on a Monday morning is just activity. The pattern that "you prefer deep work on Monday mornings" is a context insight, which must be presented to the user to accept, edit, reject, or delete before it becomes accepted memory.
+
 ## Useful Context Fields
 
 - **Task Organization Style:** How the user prefers to break down or organize tasks (e.g., `tagging`, `time-blocking`, `kanban`).
@@ -14,8 +18,9 @@ The `productivity` category handles signals from apps that understand work and t
 ## Fields Requiring Extra Care ⚠️
 
 Productivity apps often have access to highly sensitive or private information. 
-- **Do not send raw task lists or full task names.** Instead, summarize the pattern. For example, instead of sending "Buy anniversary gift for Sarah", send "Personal task management".
-- **Do not expose private documents or calendar event details.** Filter out attendee names, locations, and meeting titles. Focus on the *habit* or *preference* (e.g., "Back-to-back meetings").
+- **Raw task names, private notes, calendar details, and doc titles must be treated as overbroad source material.** They MUST NOT become app-readable context by default.
+- Instead of sending "Buy anniversary gift for Sarah", send "Personal task management". 
+- Instead of sending "1:1 with Jane Doe", focus on the *habit* or *preference* (e.g., "Back-to-back meetings").
 
 ## Example Raw App Context Dumps
 
@@ -60,13 +65,13 @@ The Memact engine normalizes this into a schema packet, filtering out any overbr
 }
 ```
 
-## User-Facing Wiki Entry Templates
+## Wiki Proposals
 
-Users will see these insights translated into plain language in their Wiki:
+Messy productivity app input is transformed into user-readable proposals. The category should show how this context becomes memory that a user can control. The user will see these insights as proposals in their Wiki to accept, edit, reject, or delete:
 
-- "You prefer to organize tasks using **time-blocking**."
-- "You frequently work on projects related to **frontend development**."
-- "You tend to use **pomodoro** techniques for focus time."
+- *Proposed:* "You prefer to organize tasks using **time-blocking**."
+- *Proposed:* "You frequently work on projects related to **frontend development**."
+- *Proposed:* "You tend to use **pomodoro** techniques for focus time."
 
 ## Category-Level Permissions
 

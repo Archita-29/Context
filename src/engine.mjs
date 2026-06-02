@@ -1,4 +1,5 @@
 import { resolveSchemaLifecycleState, schemaLifecycleLabel } from "./lifecycle.mjs";
+import { buildProductivityAttributes, inferProductivitySubSchema } from "./categories/productivity.mjs";
 
 const DEFAULT_MIN_SUPPORT = 3;
 const DEFAULT_MIN_MEANINGFUL_SCORE = 0.38;
@@ -258,8 +259,8 @@ function inferSubSchema(records = []) {
   if (/source|citation|reference/.test(text)) return "sources"
   if (/task|todo|deadline/.test(text)) return "tasks"
   if (/focus|interrupt|overload/.test(text)) return "attention_load"
-  if (/kanban|time-blocking|organization/.test(text)) return "organization_style"
-  if (/calendar|meeting/.test(text)) return "calendar_habits"
+  const productivitySubSchema = inferProductivitySubSchema(text)
+  if (productivitySubSchema) return productivitySubSchema
   return "general"
 }
 
@@ -284,19 +285,6 @@ function buildReadingAttributes(records = []) {
     preferred_summary_style: detailSignals > quickSignals ? "deep_dive" : quickSignals > detailSignals ? "quick_brief" : "unknown",
     repeat_topics: topics.filter((topic) => records.filter((record) => record.evidence?.article_topic === topic).length > 1),
     engagement_pattern: scrollDepths.some((value) => value >= 75) ? "high_scroll_depth" : scrollDepths.some((value) => value < 35) ? "low_scroll_depth" : "unknown"
-  }
-}
-
-function buildProductivityAttributes(records = []) {
-  const styles = unique(records.map((record) => record.evidence?.organization_style).filter(Boolean))
-  const projectAreas = unique(records.map((record) => record.evidence?.project_area).filter(Boolean))
-  const focusPreferences = unique(records.map((record) => record.evidence?.focus_preference).filter(Boolean))
-  const calendarHabits = unique(records.map((record) => record.evidence?.calendar_habit).filter(Boolean))
-  return {
-    preferred_organization_styles: styles,
-    recurring_project_areas: projectAreas,
-    focus_time_preferences: focusPreferences,
-    calendar_habits: calendarHabits
   }
 }
 
