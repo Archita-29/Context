@@ -253,6 +253,7 @@ export function inferSchemaType(record = {}) {
   if (/assistant|chat/.test(text)) return "ai_assistant_usage"
   if (/\b(productivity|task|tasks|work|doc|docs)\b/.test(text)) return "productivity"
   if (/fitness|workout|nutrition|diet|exercise/.test(text)) return "fitness"
+  if (/\b(smart home|thermostat|lighting|automation|bulb|temperature)\b/.test(text)) return "smart_home_preferences"
   if (/prefer|like|choice/.test(text)) return "preferences"
   return "context"
 }
@@ -711,6 +712,7 @@ function inferRecordCategory(record = {}) {
   if (/assistant|chat/.test(text)) return "ai_assistant_usage"
   if (/\b(productivity|task|tasks|work|doc|docs)\b/.test(text)) return "productivity"
   if (/fitness|workout|nutrition|diet|exercise/.test(text)) return "fitness"
+  if (/\b(smart home|thermostat|lighting|automation|bulb|temperature)\b/.test(text)) return "smart_home"
   if (/prefer|like|choice/.test(text)) return "preferences"
   return "general"
 }
