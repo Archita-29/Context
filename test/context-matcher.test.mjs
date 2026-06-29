@@ -101,3 +101,37 @@ test("context matcher injects sensitivity and approval flags based on prefix nam
     assert.equal(shoppingCandidate.requires_approval, false);
   }
 })
+
+test("context matcher adjusts threshold dynamically based on query specificity", () => {
+  // Test case 1: Broad search query (size <= 1) increases threshold
+  // Base threshold is 0.12. With 1 token ("diet"), threshold is adjusted to 0.20.
+  // A candidate with score 0.15 should be filtered out.
+  const broadResult = matchContextFields(
+    [{ description: "diet" }],
+    [{ field_path: "shopping.budget", relevance_vectors: { fitness: 0.15 }, category: "shopping" }],
+    { requestedCategory: "fitness" }
+  )
+  assert.equal(broadResult[0].candidates.length, 0, "Broad query should filter out low relevance vector match")
+
+  // If we run the same query but with a standard query (size 2), it should match.
+  // "diet preferences" has 2 tokens ("diet", "prefer"). Threshold remains base (0.12).
+  // Candidate with score 0.15 should match.
+  const standardResult = matchContextFields(
+    [{ description: "diet preferences" }],
+    [{ field_path: "shopping.budget", relevance_vectors: { fitness: 0.15 }, category: "shopping" }],
+    { requestedCategory: "fitness" }
+  )
+  assert.equal(standardResult[0].candidates.length, 1, "Standard query should include relevance vector match")
+  assert.equal(standardResult[0].candidates[0].memory.field_path, "shopping.budget")
+
+  // Test case 2: Highly specific query (size >= 3) decreases threshold
+  // Base threshold is 0.12. With 14 tokens, threshold is adjusted to 0.07.
+  // Candidate has lexical overlap/path similarity score of 1/14 = 0.071.
+  // It should be filtered out under normal threshold, but matched under decreased threshold.
+  const specificResult = matchContextFields(
+    [{ description: "budget query with a very long list of extra words that are ignored but count as tokens" }],
+    [{ field_path: "shopping.budget", value: "high", category: "shopping" }]
+  )
+  assert.equal(specificResult[0].candidates.length, 1, "Specific query should match near-match with low score")
+  assert.equal(specificResult[0].candidates[0].memory.field_path, "shopping.budget")
+})

@@ -261,17 +261,29 @@ export function createContextMatcher(options = {}) {
 }
 
 export function matchContextFields(requestedContext = [], memoryRecords = [], options = {}) {
-  const threshold = Number(options.threshold ?? 0.12)
+  const baseThreshold = Number(options.threshold ?? 0.12)
   const requestedCategory = options.requestedCategory || null; // NEW
 
   return (Array.isArray(requestedContext) ? requestedContext : []).map((requestedItem) => {
     const requestText = requestToText(requestedItem)
     const requestTokens = tokens(requestText)
+
+    // Dynamic Threshold Adjustment based on query specificity:
+    // - Broad query (<= 1 token): increase matching threshold by +0.08 to prevent irrelevant matches
+    // - Highly specific query (>= 3 tokens): decrease matching threshold by -0.05 to allow near-matches
+    // - Standard query (2 tokens): use base threshold
+    let itemThreshold = baseThreshold
+    if (requestTokens.size <= 1) {
+      itemThreshold = baseThreshold + 0.08
+    } else if (requestTokens.size >= 3) {
+      itemThreshold = Math.max(0.01, baseThreshold - 0.05)
+    }
+
     const synonymFields = SYNONYM_FIELDS[normalize(requestText)] || SYNONYM_FIELDS[normalize(requestedItem?.description)] || []
     const candidates = (Array.isArray(memoryRecords) ? memoryRecords : [])
       // Pass requestedCategory downwards
       .map((memory) => scoreMemory(requestTokens, synonymFields, memory, requestedCategory))
-      .filter((candidate) => candidate.score >= threshold)
+      .filter((candidate) => candidate.score >= itemThreshold)
       .sort((left, right) => right.score - left.score || String(left.memory.field_path || "").localeCompare(String(right.memory.field_path || "")))
     return {
       requested: requestedItem,
