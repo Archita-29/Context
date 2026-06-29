@@ -1,4 +1,7 @@
+import { createHash } from "node:crypto";
+
 const STOP_WORDS = new Set(["a", "an", "and", "app", "can", "for", "from", "get", "of", "the", "to", "use", "user", "with"])
+const HIGH_SENSITIVITY_PREFIXES = ["identity", "diet.allergy"];
 
 export const contextMatchingExamples = Object.freeze([
   {
@@ -277,17 +280,33 @@ export function matchContextFields(requestedContext = [], memoryRecords = [], op
   })
 }
 
+/**
+ * Local cryptographic helper utility to mask private PII strings before scoring execution passes
+ */
+export function anonymizePrivateIdentities(text = "") {
+  const EMAIL_PATTERN = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  return String(text).replace(EMAIL_PATTERN, (match) => {
+    return "anon_" + createHash("sha256").update(match.toLowerCase().trim()).digest("hex").slice(0, 12);
+  });
+}
+
 function scoreMemory(requestTokens, synonymFields, memory = {}) {
   const fieldPath = String(memory.field_path || memory.path || "")
+  
+  // Protect and tokenize personal information before creating searchable context blocks
+  const rawValue = String(memory.value || "")
+  const protectedValue = anonymizePrivateIdentities(rawValue)
+
   const searchable = [
     fieldPath,
     memory.category,
     memory.label,
     memory.title,
     memory.summary,
-    memory.value,
+    protectedValue,
     ...(memory.themes || [])
   ].join(" ")
+  
   const candidateTokens = tokens(searchable)
   let overlap = 0
   for (const token of requestTokens) {
@@ -313,10 +332,19 @@ function scoreMemory(requestTokens, synonymFields, memory = {}) {
   if (synonymBoost) reasons.push("example mapping")
   if (lexical) reasons.push("keyword overlap")
   if (fieldPathSimilarity) reasons.push("field path similarity")
+
+  const isHighSensitivity = HIGH_SENSITIVITY_PREFIXES.some(prefix => 
+    fieldPath.startsWith(prefix)
+  );
+
+  const sensitivity = isHighSensitivity ? "high" : "low";
+
   return {
     memory,
     score,
-    reasons: reasons.length ? reasons : ["weak fallback match"]
+    reasons: reasons.length ? reasons : ["weak fallback match"],
+    sensitivity,
+    requires_approval: sensitivity === "high" 
   }
 }
 
