@@ -287,9 +287,149 @@ export function createSchemaPacket(group = [], options = {}) {
   }
 }
 
+// --- Context Poisoning Mitigation ---------------------------------------------
+// Default limits used to isolate oversized / suspicious contributions before
+// they are ever shaped into a memory proposal.
+export const DEFAULT_PAYLOAD_LIMITS = Object.freeze({
+  maxFieldLength: 4000, // longest single string value allowed
+  maxTotalTextLength: 20000, // combined length of all text in the payload
+  maxFields: 200, // total number of object keys across the payload
+  maxDepth: 8, // deepest nesting allowed before we stop trusting the shape
+})
+
+// Signature rules that flag prompt-injection attempts, embedded system
+// commands, script/markup injection and SQL injection inside contributed text.
+const PAYLOAD_INJECTION_RULES = Object.freeze([
+  { id: "prompt_instruction_override", category: "prompt_injection", pattern: /\b(ignore|disregard|forget|override)\b[\s\S]{0,40}\b(previous|prior|earlier|above|all|your)\b[\s\S]{0,24}\b(instruction|instructions|prompt|prompts|context|rule|rules|directive)/i },
+  { id: "prompt_role_override", category: "prompt_injection", pattern: /\b(you are now|act as|pretend to be|from now on you|roleplay as)\b/i },
+  { id: "prompt_jailbreak", category: "prompt_injection", pattern: /\b(system prompt|developer mode|jailbreak|do anything now|dan mode|without restrictions?)\b/i },
+  { id: "chat_template_delimiter", category: "prompt_injection", pattern: /<\|?\s*(im_start|im_end|system|assistant|endoftext)\s*\|?>/i },
+  { id: "shell_destructive_command", category: "system_command", pattern: /(^|[^a-z])(rm\s+-rf|sudo\s+\S|chmod\s+[0-7]{3}|mkfs\b|dd\s+if=|shutdown\b|reboot\b|:\(\)\s*\{\s*:\|)/i },
+  { id: "remote_code_execution", category: "system_command", pattern: /\b(curl|wget|fetch)\b[\s\S]{0,80}\|\s*(sh|bash|zsh|python\d?)\b/i },
+  { id: "code_eval", category: "system_command", pattern: /\b(eval|exec|execfile|system|popen|child_process|subprocess)\s*\(/i },
+  { id: "command_chaining", category: "system_command", pattern: /(;|&&|\|\||`|\$\()\s*(rm|cat|curl|wget|nc|ncat|bash|sh|powershell|certutil)\b/i },
+  { id: "script_markup_injection", category: "script_injection", pattern: /<\s*script\b|javascript:\s*\S|data:text\/html|on(error|load|click|mouseover)\s*=/i },
+  { id: "sql_injection", category: "sql_injection", pattern: /\b(drop\s+table|truncate\s+table|union\s+select|insert\s+into|delete\s+from)\b|\bor\s+1\s*=\s*1\b|'\s*or\s*'/i },
+])
+
+const HIGH_RISK_CATEGORIES = new Set(["prompt_injection", "system_command", "script_injection", "sql_injection"])
+
+function snippetForPattern(text, pattern) {
+  const match = pattern.exec(text)
+  if (!match) return ""
+  const start = Math.max(0, match.index - 12)
+  return String(text.slice(start, match.index + match[0].length + 12)).replace(/\s+/g, " ").trim().slice(0, 120)
+}
+
+export function verifyContextPayload(input = {}, options = {}) {
+  const limits = { ...DEFAULT_PAYLOAD_LIMITS, ...(options.limits || {}) }
+  const violations = []
+  const texts = []
+  let fieldCount = 0
+
+  const visit = (value, depth) => {
+    if (depth > limits.maxDepth) {
+      violations.push({ rule: "max_depth_exceeded", category: "excessive_payload", detail: `nesting depth exceeds ${limits.maxDepth}` })
+      return
+    }
+    if (typeof value === "string") {
+      texts.push(value)
+      if (value.length > limits.maxFieldLength) {
+        violations.push({ rule: "max_field_length_exceeded", category: "excessive_payload", detail: `field length ${value.length} exceeds ${limits.maxFieldLength}` })
+      }
+      return
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item) => visit(item, depth + 1))
+      return
+    }
+    if (value && typeof value === "object") {
+      for (const [key, item] of Object.entries(value)) {
+        fieldCount += 1
+        texts.push(String(key))
+        visit(item, depth + 1)
+      }
+    }
+  }
+
+  visit(input, 0)
+
+  if (fieldCount > limits.maxFields) {
+    violations.push({ rule: "max_fields_exceeded", category: "excessive_payload", detail: `field count ${fieldCount} exceeds ${limits.maxFields}` })
+  }
+  const combinedLength = texts.reduce((sum, text) => sum + text.length, 0)
+  if (combinedLength > limits.maxTotalTextLength) {
+    violations.push({ rule: "max_total_length_exceeded", category: "excessive_payload", detail: `combined text length ${combinedLength} exceeds ${limits.maxTotalTextLength}` })
+  }
+
+  for (const text of texts) {
+    for (const rule of PAYLOAD_INJECTION_RULES) {
+      if (rule.pattern.test(text)) {
+        violations.push({ rule: rule.id, category: rule.category, detail: snippetForPattern(text, rule.pattern) })
+      }
+    }
+  }
+
+  const categories = unique(violations.map((violation) => violation.category))
+  const safe = violations.length === 0
+  const riskLevel = safe ? "none" : categories.some((category) => HIGH_RISK_CATEGORIES.has(category)) ? "high" : "elevated"
+
+  return {
+    schema_version: "memact.payload_verification.v0",
+    safe,
+    risk_level: riskLevel,
+    violation_categories: categories,
+    violations,
+    inspected: { field_count: fieldCount, text_length: combinedLength },
+    checked_at: new Date().toISOString(),
+  }
+}
+
+function buildQuarantinedProposal(category, verification) {
+  const now = new Date().toISOString()
+  return {
+    schema_version: "memact.context_proposal.v0",
+    input_kind: "quarantined",
+    category,
+    title: `Quarantined ${category} contribution`,
+    // The suspicious text is isolated and never echoed back into the proposal.
+    context: { isolated: true, reason: "context_poisoning_suspected" },
+    confidence: 0,
+    quarantined: true,
+    poison_report: verification,
+    status: "rejected",
+    visibility: "private",
+    revoked_at: now,
+    lifecycle_history: [{
+      action: "quarantined",
+      from_status: null,
+      to_status: "rejected",
+      occurred_at: now,
+      reason: `payload_verification_failed:${verification.violation_categories.join(",") || "unknown"}`
+    }],
+    user_action_required: true,
+    source_trail: [],
+    guardrails: [
+      "Suspicious contribution isolated; raw text is not stored or proposed.",
+      "Activity is not identity.",
+      "Do not expose raw private data by default.",
+      "User must explicitly review before any quarantined contribution is reconsidered."
+    ],
+    created_at: now,
+    updated_at: now
+  }
+}
+
 export function shapeContextProposal(input = {}, options = {}) {
   const submission = normalizeContextInput(input)
   const category = submission.category || options.category || "general"
+
+  // Reject/isolate poisoned contributions before they are shaped into memory.
+  const verification = verifyContextPayload(submission, options)
+  if (!verification.safe) {
+    return buildQuarantinedProposal(category, verification)
+  }
+
   const sourceTrail = buildContextSourceTrail(submission)
   const confidence = submission.kind === "raw_signal" ? 0.35 : sourceTrail.length ? 0.7 : 0.55
   const context = submission.kind === "raw_signal"
@@ -303,7 +443,10 @@ export function shapeContextProposal(input = {}, options = {}) {
     title: String(submission.title || context.title || `Possible ${category} context`).trim().slice(0, 160),
     context,
     confidence: round(Number(submission.confidence ?? confidence)),
-    
+
+    // Payload passed verification; record the clean verdict for auditability.
+    poison_report: verification,
+
     // NEW: Robust Claim Lifecycle Base State
     status: "pending",
     visibility: "private",
