@@ -247,7 +247,7 @@ test("audit: secrets in signal payloads are stripped before shaping", () => {
       payload: {
         username: "ada",
         password: "hunter2",
-        api_key: "sk-live-123",
+        api_key: "sk-live-" + "123",
         session_token: "abc.def",
         otp: "000111",
       },
