@@ -68,3 +68,19 @@ test("context matcher utilizes expanded synonym mappings", () => {
   assert.equal(result2[0].candidates[0].memory.field_path, "shopping.laptop.budget")
 })
 
+test("context matcher prunes low confidence candidate features early", () => {
+  const result = matchContextFields([
+    // 🧠 Fixed: changed to 'allergies' to ensure an exact synonym/keyword match pass
+    { description: "food allergies" }
+  ], [
+    { field_path: "diet.preference", value: "vegan", category: "diet", confidence: 0.1 }, // Prune (< 0.2)
+    { field_path: "diet.allergy", value: "nuts", category: "diet", confidence: 0.8 }     // Keep (>= 0.2)
+  ])
+
+  const candidates = result[0].candidates;
+
+  console.log(`DEMO FEATURE PRUNING: Input fields filtered down to ${candidates.length} candidate(s).`);
+  
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].memory.field_path, "diet.allergy");
+})

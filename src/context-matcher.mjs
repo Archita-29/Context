@@ -264,11 +264,19 @@ export function matchContextFields(requestedContext = [], memoryRecords = [], op
   return (Array.isArray(requestedContext) ? requestedContext : []).map((requestedItem) => {
     const requestText = requestToText(requestedItem)
     const requestTokens = tokens(requestText)
+    const requestedCategory = requestedItem?.category || requestedItem?.category_hint || null
     const synonymFields = SYNONYM_FIELDS[normalize(requestText)] || SYNONYM_FIELDS[normalize(requestedItem?.description)] || []
+    
     const candidates = (Array.isArray(memoryRecords) ? memoryRecords : [])
-      .map((memory) => scoreMemory(requestTokens, synonymFields, memory))
+      // 👇 Early-exit: Drop low-confidence candidates before scoring
+      .filter((memory) => {
+        const confidence = memory && typeof memory.confidence === "number" ? memory.confidence : 1.0
+        return confidence >= 0.2
+      })
+      .map((memory) => scoreMemory(requestTokens, synonymFields, memory, requestedCategory))
       .filter((candidate) => candidate.score >= threshold)
       .sort((left, right) => right.score - left.score || String(left.memory.field_path || "").localeCompare(String(right.memory.field_path || "")))
+      
     return {
       requested: requestedItem,
       request_text: requestText,
