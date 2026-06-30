@@ -648,3 +648,147 @@ export class CrossCategoryRelevanceRanker {
     return rankContextNodes(taskContext, memoryRecords, { threshold: this.threshold })
   }
 }
+
+export class CollisionTree {
+  constructor(name = "root") {
+    this.name = name;
+    this.children = new Map();
+    this.priorityList = null;
+  }
+
+  setPriority(path, priorities) {
+    const parts = typeof path === "string" ? path.split(".") : path;
+    if (!parts || parts.length === 0 || (parts.length === 1 && parts[0] === "")) {
+      this.priorityList = priorities;
+      return;
+    }
+    const [first, ...rest] = parts;
+    if (!this.children.has(first)) {
+      this.children.set(first, new CollisionTree(first));
+    }
+    this.children.get(first).setPriority(rest, priorities);
+  }
+
+  getPriority(path) {
+    const parts = typeof path === "string" ? path.split(".") : path;
+    let current = this;
+    let bestPriority = this.priorityList;
+    for (const part of parts) {
+      if (current.children.has(part)) {
+        current = current.children.get(part);
+        if (current.priorityList !== null) {
+          bestPriority = current.priorityList;
+        }
+      } else {
+        break;
+      }
+    }
+    return bestPriority;
+  }
+}
+
+export function resolveOverwriteCollisions(writes = [], priorityTree = null, categoryWeights = {}) {
+  // Group writes by target path
+  const grouped = {};
+  for (const write of writes) {
+    const path = write.path;
+    if (!grouped[path]) {
+      grouped[path] = [];
+    }
+    grouped[path].push(write);
+  }
+
+  const resolved = {};
+  const routedToCRP = [];
+
+  for (const [path, pathWrites] of Object.entries(grouped)) {
+    if (pathWrites.length === 1) {
+      resolved[path] = pathWrites[0];
+      continue;
+    }
+
+    // Collision!
+    // 1. Resolve using PriorityTree
+    let priorities = null;
+    if (priorityTree) {
+      priorities = priorityTree.getPriority(path);
+    }
+
+    let winningWrite = null;
+
+    if (priorities && priorities.length > 0) {
+      let bestIndex = Infinity;
+      let candidates = [];
+      for (const w of pathWrites) {
+        const idx = priorities.indexOf(w.category);
+        if (idx !== -1) {
+          if (idx < bestIndex) {
+            bestIndex = idx;
+            candidates = [w];
+          } else if (idx === bestIndex) {
+            candidates.push(w);
+          }
+        }
+      }
+      if (candidates.length === 1) {
+        winningWrite = candidates[0];
+      } else if (candidates.length > 1) {
+        winningWrite = resolveByWeights(candidates, categoryWeights);
+      }
+    }
+
+    // 2. If priority tree did not resolve, fall back to weights on all pathWrites
+    if (!winningWrite) {
+      winningWrite = resolveByWeights(pathWrites, categoryWeights);
+    }
+
+    if (winningWrite) {
+      resolved[path] = winningWrite;
+    } else {
+      routedToCRP.push({
+        path,
+        reason: "collision_unresolved",
+        writes: pathWrites,
+        route_to_crp: true
+      });
+    }
+  }
+
+  return {
+    resolved,
+    routedToCRP
+  };
+}
+
+function resolveByWeights(writes, categoryWeights) {
+  let maxWeight = -Infinity;
+  let candidates = [];
+  for (const w of writes) {
+    const weight = categoryWeights[w.category] !== undefined ? categoryWeights[w.category] : 1.0;
+    if (weight > maxWeight) {
+      maxWeight = weight;
+      candidates = [w];
+    } else if (weight === maxWeight) {
+      candidates.push(w);
+    }
+  }
+  if (candidates.length === 1) {
+    return candidates[0];
+  }
+  // Check confidence as a secondary metric
+  let maxConfidence = -Infinity;
+  let confidenceCandidates = [];
+  for (const w of candidates) {
+    const conf = w.confidence !== undefined ? w.confidence : 1.0;
+    if (conf > maxConfidence) {
+      maxConfidence = conf;
+      confidenceCandidates = [w];
+    } else if (conf === maxConfidence) {
+      confidenceCandidates.push(w);
+    }
+  }
+  if (confidenceCandidates.length === 1) {
+    return confidenceCandidates[0];
+  }
+  return null;
+}
