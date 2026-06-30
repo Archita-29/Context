@@ -1,6 +1,6 @@
 import { resolveSchemaLifecycleState, schemaLifecycleLabel } from "./lifecycle.mjs";
 export { buildMissingContextFields, contextGoalTemplates, groupContextEntry, suggestContextGoal } from "./context-goals.mjs";
-export { LocalContextMatcher, SemanticContextMatcher, createContextMatcher, matchContextFields, rankContextNodes, CrossCategoryRelevanceRanker } from "./context-matcher.mjs";
+export { LocalContextMatcher, SemanticContextMatcher, createContextMatcher, matchContextFields, rankContextNodes, CrossCategoryRelevanceRanker, CollisionTree, resolveOverwriteCollisions } from "./context-matcher.mjs";
 
 // ---------------------------------------------------------------------------
 // Schema Overlay Compiler
