@@ -191,6 +191,78 @@ test("context matcher adjusts threshold dynamically based on query specificity",
   assert.equal(specificResult[0].candidates[0].memory.field_path, "shopping.budget")
 })
 
+test("context matcher respects a per-session minimum threshold floor", () => {
+  const baselineResult = matchContextFields(
+    [{ description: "diet preferences" }],
+    [{ field_path: "shopping.budget", relevance_vectors: { fitness: 0.15 }, category: "shopping" }],
+    { requestedCategory: "fitness" }
+  )
+  assert.equal(baselineResult[0].candidates.length, 1)
+
+  const sessionCappedResult = matchContextFields(
+    [{ description: "diet preferences" }],
+    [{ field_path: "shopping.budget", relevance_vectors: { fitness: 0.15 }, category: "shopping" }],
+    {
+      requestedCategory: "fitness",
+      querySession: { minimumMatchingThreshold: 0.16 }
+    }
+  )
+
+  assert.equal(sessionCappedResult[0].candidates.length, 0)
+})
+
+test("context matcher isolates developer tool context from shopping queries", () => {
+  const request = [{ description: "shopping for a laptop bag and retail accessories" }]
+  const developerMemory = [{
+    field_path: "developer.cursor.workspace",
+    value: "Cursor and GitHub workflow settings",
+    category: "developer_work",
+    relevance_vectors: { shopping: 0.95 }
+  }]
+
+  const matched = matchContextFields(request, developerMemory, { requestedCategory: "shopping" })
+  assert.equal(matched[0].candidates.length, 0)
+
+  const ranked = rankContextNodes("shopping for a laptop bag and retail accessories", developerMemory)
+  assert.equal(ranked.length, 0)
+})
+
+test("context matcher partitions food-delivery from health and fitness queries", () => {
+  const foodDeliveryMemory = [{
+    field_path: "food-delivery.restaurant_name",
+    value: "Punjabi Tadka",
+    category: "food-delivery",
+    relevance_vectors: { health: 0.9, fitness: 0.9 }
+  }]
+
+  const healthResult = matchContextFields(
+    [{ description: "health insurance deductible and wellness coverage" }],
+    foodDeliveryMemory,
+    { requestedCategory: "health" }
+  )
+  assert.equal(healthResult[0].candidates.length, 0)
+
+  const fitnessResult = rankContextNodes(
+    "fitness tracking and workout goals",
+    foodDeliveryMemory
+  )
+  assert.equal(fitnessResult.length, 0)
+
+  const healthMemory = [{
+    field_path: "health.activity_log",
+    value: "Outdoor Run",
+    category: "health",
+    relevance_vectors: { food_delivery: 0.9 }
+  }]
+
+  const foodResult = matchContextFields(
+    [{ description: "food delivery dinner order" }],
+    healthMemory,
+    { requestedCategory: "food-delivery" }
+  )
+  assert.equal(foodResult[0].candidates.length, 0)
+})
+
 test("cross-category relevance ranking engine ranks candidates globally", () => {
   const memories = [
     { field_path: "diet.preference", value: "vegan", category: "diet" },

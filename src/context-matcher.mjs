@@ -3,14 +3,32 @@ import { SYNONYM_TRIE, normalize, stem, STOP_WORDS, HIGH_SENSITIVITY_PREFIXES } 
 
 export { contextMatchingExamples } from "./synonym-registry.mjs";
 
+const DEVELOPER_TOOL_TERMS = [
+  "cursor",
+  "github",
+  "repository",
+  "repo",
+  "branch",
+  "pull request",
+  "commit",
+  "merge",
+  "vscode",
+  "source control"
+];
+
+const FOOD_DELIVERY_DOMAIN = new Set(["food-delivery", "food_delivery", "fooddelivery", "shopping.food_delivery"]);
+const HEALTH_FITNESS_DOMAIN = new Set(["health", "fitness", "health.fitness", "health_fitness", "healthfitness"]);
+
 export class LocalContextMatcher {
-  constructor({ threshold = 0.12 } = {}) {
+  constructor({ threshold = 0.12, minimumThreshold = null } = {}) {
     this.threshold = Number(threshold);
+    const parsedMinimumThreshold = Number(minimumThreshold);
+    this.minimumThreshold = Number.isFinite(parsedMinimumThreshold) ? parsedMinimumThreshold : null;
     this.kind = "local_keyword_overlap";
   }
 
   match(requestedContext = [], memoryRecords = []) {
-    return matchContextFields(requestedContext, memoryRecords, { threshold: this.threshold });
+    return matchContextFields(requestedContext, memoryRecords, { threshold: this.threshold, minimumThreshold: this.minimumThreshold });
   }
 }
 
@@ -27,6 +45,7 @@ export function createContextMatcher(options = {}) {
 
 export function matchContextFields(requestedContext = [], memoryRecords = [], options = {}) {
   const baseThreshold = Number(options.threshold ?? 0.12);
+  const sessionMinimumThreshold = resolveMinimumThreshold(options);
   const requestedCategory = options.requestedCategory || null;
 
   return (Array.isArray(requestedContext) ? requestedContext : []).map((requestedItem) => {
@@ -41,6 +60,9 @@ export function matchContextFields(requestedContext = [], memoryRecords = [], op
     } else if (requestTokens.size >= 3) {
       itemThreshold = Math.max(0.01, baseThreshold - 0.05);
     }
+    if (sessionMinimumThreshold !== null) {
+      itemThreshold = Math.max(itemThreshold, sessionMinimumThreshold);
+    }
     
     // 🔍 Extract target field rules out of our integrated Synonym Stem Trie
     const synonymFields = SYNONYM_TRIE.searchSynonyms(requestText).length > 0 
@@ -52,7 +74,7 @@ export function matchContextFields(requestedContext = [], memoryRecords = [], op
         const confidence = memory && typeof memory.confidence === "number" ? memory.confidence : 1.0;
         return confidence >= 0.2;
       })
-      .map((memory) => scoreMemory(requestTokens, synonymFields, memory, itemCategory))
+      .map((memory) => scoreMemory(requestText, requestTokens, synonymFields, memory, itemCategory))
       .filter((candidate) => candidate.score >= itemThreshold)
       .sort((left, right) => right.score - left.score || String(left.memory.field_path || "").localeCompare(String(right.memory.field_path || "")));
       
@@ -74,8 +96,26 @@ export function anonymizePrivateIdentities(text = "") {
   });
 }
 
-function scoreMemory(requestTokens, synonymFields, memory = {}, requestedCategory = null) {
+function scoreMemory(requestText, requestTokens, synonymFields, memory = {}, requestedCategory = null) {
   const fieldPath = String(memory.field_path || memory.path || "");
+  if (isPartitionedDomainConflict(requestedCategory, requestText, memory)) {
+    return {
+      memory,
+      score: 0,
+      reasons: ["cross-domain partition blocked"],
+      sensitivity: "low",
+      requires_approval: false
+    };
+  }
+  if (isShoppingIntent(requestText, requestedCategory) && isDeveloperToolContext(memory)) {
+    return {
+      memory,
+      score: 0,
+      reasons: ["developer tool context suppressed for shopping query"],
+      sensitivity: "low",
+      requires_approval: false
+    };
+  }
   
   // Protect personal information before tokenizing
   const rawValue = String(memory.value || "");
@@ -173,6 +213,96 @@ function scoreMemory(requestTokens, synonymFields, memory = {}, requestedCategor
 function requestToText(item) {
   if (typeof item === "string") return item;
   return [item?.description, item?.field_hint, item?.category_hint, item?.name].filter(Boolean).join(" ");
+}
+
+function resolveMinimumThreshold(options = {}) {
+  const candidates = [
+    options.minimumThreshold,
+    options.minThreshold,
+    options.minimumMatchingThreshold,
+    options.session?.minimumThreshold,
+    options.session?.minThreshold,
+    options.session?.minimumMatchingThreshold,
+    options.querySession?.minimumThreshold,
+    options.querySession?.minThreshold,
+    options.querySession?.minimumMatchingThreshold,
+    options.query_session?.minimum_threshold,
+    options.query_session?.min_threshold,
+    options.query_session?.minimum_matching_threshold,
+    options.sessionConfig?.minimumThreshold,
+    options.sessionConfig?.minThreshold,
+    options.sessionConfig?.minimumMatchingThreshold,
+    options.session_config?.minimum_threshold,
+    options.session_config?.min_threshold,
+    options.session_config?.minimum_matching_threshold
+  ];
+
+  for (const candidate of candidates) {
+    const threshold = Number(candidate);
+    if (Number.isFinite(threshold)) {
+      return threshold;
+    }
+  }
+
+  return null;
+}
+
+function isShoppingIntent(text = "", category = null, inferredCategories = null) {
+  if (String(category || "").toLowerCase().trim() === "shopping") return true;
+  if (inferredCategories instanceof Set && inferredCategories.has("shopping")) return true;
+  return /\b(shopping|shop|retail|store|stores|commerce|buy|purchase|product|products|cart|checkout)\b/i.test(String(text || ""));
+}
+
+function isDeveloperToolContext(memory = {}) {
+  const category = String(memory.category || "").toLowerCase().trim();
+  if (category === "developer_work") return true;
+
+  const searchable = [
+    String(memory.field_path || memory.path || ""),
+    memory.category,
+    memory.label,
+    memory.title,
+    memory.summary,
+    memory.value,
+    ...(Array.isArray(memory.themes) ? memory.themes : [])
+  ].join(" ").toLowerCase();
+
+  return DEVELOPER_TOOL_TERMS.some((term) => searchable.includes(term));
+}
+
+function isPartitionedDomainConflict(requestedCategory, requestText, memory = {}, inferredCategories = null) {
+  const queryDomains = new Set();
+  const normalizedRequested = normalizeDomainKey(requestedCategory);
+  if (normalizedRequested) queryDomains.add(normalizedRequested);
+
+  if (inferredCategories instanceof Set) {
+    for (const category of inferredCategories) {
+      const normalized = normalizeDomainKey(category);
+      if (normalized) queryDomains.add(normalized);
+    }
+  }
+
+  const text = String(requestText || "").toLowerCase();
+  if (/\b(food delivery|takeout|delivery order|restaurant|meal order|food order|eat out|zomato|swiggy|ubereats)\b/i.test(text)) {
+    queryDomains.add("food-delivery");
+  }
+  if (/\b(health|fitness|wellness|medical|insurance|benefits|workout|exercise|gym|run)\b/i.test(text)) {
+    queryDomains.add("health-fitness");
+  }
+
+  const memoryDomain = normalizeDomainKey(memory.category || memory.field_path || memory.path || "");
+  if (!memoryDomain) return false;
+
+  const queryHasFoodDelivery = queryDomains.has("food-delivery");
+  const queryHasHealthFitness = queryDomains.has("health-fitness");
+  const memoryIsFoodDelivery = FOOD_DELIVERY_DOMAIN.has(memoryDomain);
+  const memoryIsHealthFitness = HEALTH_FITNESS_DOMAIN.has(memoryDomain);
+
+  return (queryHasFoodDelivery && memoryIsHealthFitness) || (queryHasHealthFitness && memoryIsFoodDelivery);
+}
+
+function normalizeDomainKey(value = "") {
+  return String(value).toLowerCase().trim().replace(/[^a-z0-9]+/g, "");
 }
 
 // Convert input value into clean tokenized stems
@@ -274,6 +404,7 @@ export function rankContextNodes(taskContext, memoryRecords = [], options = {}) 
     "food": ["food", "diet", "allergy", "restaurant", "dinner", "lunch", "meal", "eat", "cooking"],
     "diet": ["diet", "preference", "allergy", "vegetarian", "vegan", "gluten", "food"],
     "fitness": ["fitness", "workout", "gym", "exercise", "run", "training", "sports"],
+    "health": ["health", "wellness", "medical", "medicine", "insurance", "benefits", "clinic"],
     "shopping": ["shopping", "budget", "buy", "purchase", "price", "spend", "store", "laptop"],
     "learning": ["learning", "study", "course", "education", "tutorial", "exam"],
     "identity": ["identity", "name", "username", "profile", "language", "timezone"],
@@ -292,6 +423,20 @@ export function rankContextNodes(taskContext, memoryRecords = [], options = {}) 
   const scored = (Array.isArray(memoryRecords) ? memoryRecords : []).map((memory) => {
     const fieldPath = String(memory.field_path || memory.path || "");
     const category = String(memory.category || "").toLowerCase();
+    if (isPartitionedDomainConflict(null, taskText, memory, inferredCategories)) {
+      return {
+        memory,
+        score: 0,
+        reasons: ["cross-domain partition blocked"]
+      };
+    }
+    if (isShoppingIntent(taskText, null, inferredCategories) && isDeveloperToolContext(memory)) {
+      return {
+        memory,
+        score: 0,
+        reasons: ["developer tool context suppressed for shopping query"]
+      };
+    }
     
     const searchable = [
       fieldPath,
